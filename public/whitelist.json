@@ -1,9 +1,9 @@
 {
   "cachedAt": "2025-08-19T00:00:00Z",
   "goldReleases": [
-    { "tokenId": 101, "title": "Pi²", "uri": "" },
-    { "tokenId": 102, "title": "ALLOWANCE", "uri": "" },
-    { "tokenId": 103, "title": "DEPARTURE", "uri": "" }
+    { "tokenId": 16, "title": "Pi²", "uri": "https://arweave.net/EQgJ..." },
+    { "tokenId": 23, "title": "ALLOWANCE", "uri": "https://arweave.net/zfNh..." },
+    { "tokenId": 42, "title": "DEPARTURE", "uri": "https://arweave.net/abc..." }
   ]
 }
 

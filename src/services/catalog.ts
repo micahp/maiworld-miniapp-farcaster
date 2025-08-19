@@ -27,7 +27,18 @@ function parseHtmlForReleases(html: string): GoldEntry[] {
 }
 
 export async function getCachedGoldList(): Promise<GoldEntry[]> {
-  // Try localStorage cache first
+  // First, prefer bundled whitelist shipped with the app (stable token IDs)
+  try {
+    const res = await fetch('/whitelist.json')
+    if (res.ok) {
+      const j = await res.json()
+      return (j.goldReleases || []).map((r: any) => ({ tokenId: r.tokenId, title: r.title, uri: r.uri }))
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // Next, try localStorage cache
   try {
     const raw = localStorage.getItem(CACHE_KEY)
     if (raw) {
@@ -40,7 +51,7 @@ export async function getCachedGoldList(): Promise<GoldEntry[]> {
     // ignore
   }
 
-  // Attempt to fetch Catalog page and parse
+  // Lastly, attempt to fetch Catalog page and parse (best-effort)
   try {
     const html = await fetchCatalogPage()
     const items = parseHtmlForReleases(html)
@@ -53,18 +64,7 @@ export async function getCachedGoldList(): Promise<GoldEntry[]> {
       return items
     }
   } catch (e) {
-    // fallback to bundled whitelist
-  }
-
-  // Fallback: load public/whitelist.json
-  try {
-    const res = await fetch('/public/whitelist.json')
-    if (res.ok) {
-      const j = await res.json()
-      return (j.goldReleases || []).map((r: any) => ({ tokenId: r.tokenId, title: r.title, uri: r.uri }))
-    }
-  } catch (e) {
-    // ignore
+    // fallback to empty
   }
 
   return []

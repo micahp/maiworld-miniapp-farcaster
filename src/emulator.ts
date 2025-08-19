@@ -60,15 +60,21 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     container.style.zIndex = '9999'
     container.style.display = 'flex'
     container.style.flexDirection = 'column'
-    container.style.alignItems = 'center'
+    // make children stretch to fill container so canvas can scale
+    container.style.alignItems = 'stretch'
     container.style.justifyContent = 'center'
     container.style.background = '#081018'
     container.style.border = '6px solid #f6f2d4'
     container.style.boxShadow = '0 8px 30px rgba(0,0,0,0.8)'
+    container.style.boxSizing = 'border-box'
   } else {
     container.style.display = 'flex'
     container.style.flexDirection = 'column'
-    container.style.alignItems = 'center'
+    container.style.alignItems = 'stretch'
+    container.style.justifyContent = 'center'
+    container.style.width = '100%'
+    container.style.height = '100%'
+    container.style.boxSizing = 'border-box'
   }
 
   const canvas = document.createElement('canvas')
@@ -77,17 +83,14 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
   canvas.height = 144 * 3
   canvas.style.imageRendering = 'pixelated'
   canvas.style.background = '#000'
+  // scale canvas to fill parent container while preserving internal resolution
+  canvas.style.width = '100%'
+  canvas.style.height = '100%'
   canvas.style.maxWidth = '100%'
   canvas.style.maxHeight = '100%'
 
-  const info = document.createElement('div')
-  info.style.color = '#f6f2d4'
-  info.style.marginTop = '8px'
-  info.style.fontFamily = 'monospace'
-  info.textContent = `ROM loaded — ${buf.byteLength} bytes (placeholder emulator)`
-
+  // append canvas only; any user-facing messages are shown via overlay or console
   container.appendChild(canvas)
-  container.appendChild(info)
 
   // If overlay, add close button and backdrop behavior
   let overlayBackdrop: HTMLDivElement | null = null
@@ -122,7 +125,7 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     mountEl!.appendChild(container)
   }
 
-  // placeholder draw
+  // placeholder draw (canvas only)
   const ctx = canvas.getContext('2d')!
   ctx.fillStyle = '#0b1220'
   ctx.fillRect(0, 0, canvas.width, canvas.height)

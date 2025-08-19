@@ -142,69 +142,86 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
       }
       if (!loaded) console.error('All WasmBoy CDN load attempts failed')
     }
-    if (WasmBoy && typeof WasmBoy.create === 'function') {
-      onProgress?.('Initializing WasmBoy...')
-      // Create WasmBoy instance and mount to our canvas
-      // This uses the global WasmBoy API from the CDN build
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      const wb = await WasmBoy.create({
-        canvas: canvas,
-        // optional: prefer audio disabled initially
-        enableAudio: false
-      })
-      console.log('WasmBoy created:', !!wb)
-
-      // load ROM buffer
-      try {
-        // WasmBoy expects Uint8Array
-        const romBytes = new Uint8Array(buf)
-        console.log('ROM bytes length:', romBytes.length)
+    if (WasmBoy) {
+      // Two possible shapes: CDN exposes a factory with create(), npm dist exposes
+      // a singleton object with methods like loadROM/play/setCanvas.
+      if (typeof WasmBoy.create === 'function') {
+        onProgress?.('Initializing WasmBoy (factory.create)...')
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        await wb.loadROM(romBytes)
-        console.log('WasmBoy ROM loaded successfully')
-        onProgress?.('WasmBoy ROM loaded; starting...')
-        // start emulation
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        wb.run()
-        console.log('WasmBoy started')
-      } catch (romErr) {
-        console.error('WasmBoy ROM load failed', romErr)
-        console.warn('WasmBoy ROM load failed (falling back to placeholder)')
-        onProgress?.('WasmBoy ROM load failed — showing placeholder')
-      }
+        const wb = await WasmBoy.create({ canvas: canvas, enableAudio: false })
+        console.log('WasmBoy instance created via create():', !!wb)
 
-      // basic keyboard mapping: arrow keys and z/x for A/B
-      const keyMap: Record<string, string> = {
-        ArrowUp: 'up',
-        ArrowDown: 'down',
-        ArrowLeft: 'left',
-        ArrowRight: 'right',
-        z: 'a',
-        x: 'b',
-        Enter: 'start',
-        Shift: 'select'
-      }
-
-      function keyHandler(e: KeyboardEvent, pressed: boolean) {
-        const k = keyMap[e.key]
-        if (!k) return
-        e.preventDefault()
         try {
+          const romBytes = new Uint8Array(buf)
+          console.log('ROM bytes length:', romBytes.length)
           // eslint-disable-next-line @typescript-eslint/ban-ts-comment
           // @ts-ignore
-          if (pressed) wb.buttonDown(k)
-          else wb.buttonUp(k)
-        } catch (er) {}
+          await wb.loadROM(romBytes)
+          console.log('WasmBoy ROM loaded successfully (instance)')
+          onProgress?.('WasmBoy ROM loaded; starting...')
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          wb.run()
+          console.log('WasmBoy instance started')
+        } catch (romErr) {
+          console.error('WasmBoy instance ROM load failed', romErr)
+          onProgress?.('WasmBoy ROM load failed — showing placeholder')
+        }
+
+        // buttons via instance API
+        const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select' }
+        function keyHandlerInstance(e: KeyboardEvent, pressed: boolean) {
+          const k = keyMap[e.key]
+          if (!k) return
+          e.preventDefault()
+          try { if (pressed) wb.buttonDown(k); else wb.buttonUp(k) } catch (er) {}
+        }
+        window.addEventListener('keydown', (e) => keyHandlerInstance(e, true))
+        window.addEventListener('keyup', (e) => keyHandlerInstance(e, false))
+
+        onProgress?.('Emulator running (WasmBoy)')
+        return { canvas, romSize: buf.byteLength, wasmboy: wb }
       }
 
-      window.addEventListener('keydown', (e) => keyHandler(e, true))
-      window.addEventListener('keyup', (e) => keyHandler(e, false))
+      // npm/dist variant: singleton API
+      if (typeof WasmBoy.loadROM === 'function') {
+        console.log('Using WasmBoy singleton API (npm dist)')
+        try {
+          // set canvas if available
+          try { WasmBoy.setCanvas && WasmBoy.setCanvas(canvas) } catch (e) {}
+          const romBytes = new Uint8Array(buf)
+          console.log('ROM bytes length:', romBytes.length)
+          // WasmBoy.loadROM accepts various inputs; pass Uint8Array
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          await WasmBoy.loadROM(romBytes)
+          console.log('WasmBoy singleton ROM loaded')
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          if (typeof WasmBoy.play === 'function') WasmBoy.play()
+          else if (typeof WasmBoy.run === 'function') WasmBoy.run()
+          console.log('WasmBoy singleton started')
 
-      onProgress?.('Emulator running (WasmBoy)')
-      return { canvas, romSize: buf.byteLength, wasmboy: wb }
+          // controller state mapping
+          const controllerState: any = { UP: 0, RIGHT: 0, DOWN: 0, LEFT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
+          const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT' }
+          function keyHandlerSingleton(e: KeyboardEvent, pressed: boolean) {
+            const s = keyToState[e.key]
+            if (!s) return
+            e.preventDefault()
+            controllerState[s] = pressed ? 1 : 0
+            try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
+          }
+          window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true))
+          window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false))
+
+          onProgress?.('Emulator running (WasmBoy singleton)')
+          return { canvas, romSize: buf.byteLength, wasmboy: WasmBoy }
+        } catch (err) {
+          console.error('WasmBoy singleton error', err)
+        }
+      }
     }
     console.log('WasmBoy.create not available; will use placeholder')
   } catch (wbErr) {

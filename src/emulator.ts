@@ -95,9 +95,22 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
   ;(window as any).__MAIWORLD_ROM = buf
   // Try to initialize WasmBoy if available on window (loaded via CDN)
   try {
-    // ensure WasmBoy is available; if not, try to load CDN script dynamically
+    // ensure WasmBoy is available; try npm dynamic import first, then window global, then CDN
     // @ts-ignore
     let WasmBoy = (window as any).WasmBoy
+    // attempt dynamic npm import (preferred when installed)
+    try {
+      // dynamic import; suppress TS module-not-found lint if types are absent
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const mod = await import('wasmboy')
+      // module might export default or named WasmBoy
+      // @ts-ignore
+      WasmBoy = mod?.default ?? mod?.WasmBoy ?? mod
+      console.log('WasmBoy npm import available:', !!WasmBoy)
+    } catch (impErr) {
+      console.warn('WasmBoy npm import failed (not installed?):', impErr)
+    }
     console.log('WasmBoy global initially:', !!WasmBoy)
     if (!WasmBoy) {
       const cdnCandidates = [

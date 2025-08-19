@@ -9,6 +9,11 @@ Short status
 - A bundled ROM placeholder exists at `public/roms/Maiworld_8-25-21.gb` and a placeholder
   emulator loader is wired to the Play button.
 
+Additional context added by developer:
+- Decision log created at `decisions/token-gated-gb-miniapp-2025-08-19.md` and committed.
+- An empty commit with message `COMMIT` was applied to satisfy repository workflow.
+
+
 Files changed/created in this session
 - `package.json`, `vite.config.ts`, `index.html`
 - `src/main.ts`, `src/styles.css`, `src/services/ownership.ts`, `src/services/catalog.ts`,

@@ -95,9 +95,31 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
   ;(window as any).__MAIWORLD_ROM = buf
   // Try to initialize WasmBoy if available on window (loaded via CDN)
   try {
+    // ensure WasmBoy is available; if not, try to load CDN script dynamically
     // @ts-ignore
-    const WasmBoy = (window as any).WasmBoy
-    console.log('WasmBoy global:', !!WasmBoy)
+    let WasmBoy = (window as any).WasmBoy
+    console.log('WasmBoy global initially:', !!WasmBoy)
+    if (!WasmBoy) {
+      try {
+        const scriptUrl = 'https://unpkg.com/wasmboy/dist/wasmboy.min.js'
+        console.log('Attempting to load WasmBoy CDN script:', scriptUrl)
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement('script')
+          s.src = scriptUrl
+          s.async = false
+          s.onload = () => resolve()
+          s.onerror = (e) => reject(new Error('WasmBoy CDN script failed to load'))
+          document.head.appendChild(s)
+          // timeout
+          setTimeout(() => reject(new Error('WasmBoy CDN script load timeout')), 8000)
+        })
+        // @ts-ignore
+        WasmBoy = (window as any).WasmBoy
+        console.log('WasmBoy global after dynamic load:', !!WasmBoy)
+      } catch (loadErr) {
+        console.error('WasmBoy CDN dynamic load failed:', loadErr)
+      }
+    }
     if (WasmBoy && typeof WasmBoy.create === 'function') {
       onProgress?.('Initializing WasmBoy...')
       // Create WasmBoy instance and mount to our canvas

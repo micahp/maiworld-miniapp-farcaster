@@ -33,6 +33,8 @@
   token lists and metadata (remove brittle HTML parse). (priority: high)
 - Replace `public/roms/Maiworld_8-25-21.gb` placeholder with the real ROM binary and
   integrate WasmBoy (or equivalent) to run the ROM with input and save-state support.
+- Replace ROM placeholder with real .gb (dev replaced marker) and integrate WasmBoy; UI
+  now loads metadata images and autoplayable video rectangles in-place. (in-progress)
 - Improve edition detection (any token holder in the contract may play) by relying on
   a light index or by calling a trusted indexer to avoid brute-force ownerOf scans.
 - Add tests (Jest + mocked provider) covering gating logic and Catalog caching.

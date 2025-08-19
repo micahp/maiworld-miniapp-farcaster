@@ -18,4 +18,10 @@ body{background:var(--bg);color:var(--panel);font-family:'Press Start 2P', monos
 /* 90s CRT boxy vibe */
 pre{background:#000;color:#0f0;padding:8px;border:3px inset #222;overflow:auto}
 
+/* Media display */
+.media{display:flex;flex-direction:column;align-items:center;gap:8px}
+.media-header{color:var(--panel);font-weight:bold}
+.cover{max-height:250px;width:auto;max-width:100%;object-fit:cover;border:4px solid #222}
+.media-video{height:250px;width:100%;max-width:480px;object-fit:cover;border:4px solid #222}
+
 

@@ -97,6 +97,7 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
   try {
     // @ts-ignore
     const WasmBoy = (window as any).WasmBoy
+    console.log('WasmBoy global:', !!WasmBoy)
     if (WasmBoy && typeof WasmBoy.create === 'function') {
       onProgress?.('Initializing WasmBoy...')
       // Create WasmBoy instance and mount to our canvas
@@ -108,21 +109,26 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
         // optional: prefer audio disabled initially
         enableAudio: false
       })
+      console.log('WasmBoy created:', !!wb)
 
       // load ROM buffer
       try {
         // WasmBoy expects Uint8Array
         const romBytes = new Uint8Array(buf)
+        console.log('ROM bytes length:', romBytes.length)
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         await wb.loadROM(romBytes)
+        console.log('WasmBoy ROM loaded successfully')
         onProgress?.('WasmBoy ROM loaded; starting...')
         // start emulation
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         wb.run()
+        console.log('WasmBoy started')
       } catch (romErr) {
-        console.warn('WasmBoy ROM load failed', romErr)
+        console.error('WasmBoy ROM load failed', romErr)
+        console.warn('WasmBoy ROM load failed (falling back to placeholder)')
         onProgress?.('WasmBoy ROM load failed — showing placeholder')
       }
 
@@ -156,8 +162,9 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
       onProgress?.('Emulator running (WasmBoy)')
       return { canvas, romSize: buf.byteLength, wasmboy: wb }
     }
+    console.log('WasmBoy.create not available; will use placeholder')
   } catch (wbErr) {
-    console.warn('WasmBoy init error', wbErr)
+    console.error('WasmBoy init error', wbErr)
   }
 
   // If WasmBoy not available or failed, return placeholder

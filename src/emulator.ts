@@ -100,25 +100,34 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     let WasmBoy = (window as any).WasmBoy
     console.log('WasmBoy global initially:', !!WasmBoy)
     if (!WasmBoy) {
-      try {
-        const scriptUrl = 'https://unpkg.com/wasmboy/dist/wasmboy.min.js'
-        console.log('Attempting to load WasmBoy CDN script:', scriptUrl)
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement('script')
-          s.src = scriptUrl
-          s.async = false
-          s.onload = () => resolve()
-          s.onerror = (e) => reject(new Error('WasmBoy CDN script failed to load'))
-          document.head.appendChild(s)
-          // timeout
-          setTimeout(() => reject(new Error('WasmBoy CDN script load timeout')), 8000)
-        })
-        // @ts-ignore
-        WasmBoy = (window as any).WasmBoy
-        console.log('WasmBoy global after dynamic load:', !!WasmBoy)
-      } catch (loadErr) {
-        console.error('WasmBoy CDN dynamic load failed:', loadErr)
+      const cdnCandidates = [
+        'https://unpkg.com/wasmboy/dist/wasmboy.min.js',
+        'https://cdn.jsdelivr.net/npm/wasmboy/dist/wasmboy.min.js',
+        'https://cdn.jsdelivr.net/gh/wasmboy/wasmboy/dist/wasmboy.min.js'
+      ]
+      let loaded = false
+      for (const scriptUrl of cdnCandidates) {
+        try {
+          console.log('Attempting to load WasmBoy CDN script:', scriptUrl)
+          await new Promise<void>((resolve, reject) => {
+            const s = document.createElement('script')
+            s.src = scriptUrl
+            s.async = false
+            s.onload = () => resolve()
+            s.onerror = (e) => reject(new Error(`WasmBoy CDN script failed to load: ${scriptUrl}`))
+            document.head.appendChild(s)
+            // timeout
+            setTimeout(() => reject(new Error(`WasmBoy CDN script load timeout: ${scriptUrl}`)), 8000)
+          })
+          // @ts-ignore
+          WasmBoy = (window as any).WasmBoy
+          console.log('WasmBoy global after dynamic load attempt:', !!WasmBoy, scriptUrl)
+          if (WasmBoy) { loaded = true; break }
+        } catch (loadErr) {
+          console.warn('WasmBoy CDN dynamic load failed for', scriptUrl, loadErr)
+        }
       }
+      if (!loaded) console.error('All WasmBoy CDN load attempts failed')
     }
     if (WasmBoy && typeof WasmBoy.create === 'function') {
       onProgress?.('Initializing WasmBoy...')

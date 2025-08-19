@@ -51,12 +51,13 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
   const container = document.createElement('div')
   const isOverlay = !mountEl
   if (isOverlay) {
-    // overlay styles: almost full-screen modal
+    // overlay styles: centered modal that fills most of the viewport
     container.style.position = 'fixed'
-    container.style.left = '5%'
-    container.style.top = '5%'
-    container.style.width = '50%'
-    container.style.height = '50%'
+    container.style.left = '50%'
+    container.style.top = '50%'
+    container.style.transform = 'translate(-50%,-50%)'
+    container.style.width = '90vw'
+    container.style.height = '90vh'
     container.style.zIndex = '9999'
     container.style.display = 'flex'
     container.style.flexDirection = 'column'

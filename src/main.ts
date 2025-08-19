@@ -39,27 +39,153 @@ scanBtn.addEventListener('click', async () => {
 
     console.log('Ownership check result:', res)
     if (res.ownsAny) {
-      // Fetch metadata for first token that provides a metadataUri
-      const firstWithUri = res.tokens.find((t: any) => (t && typeof t === 'object' && 'metadataUri' in t && (t as any).metadataUri))
-      let mediaHtml = `<pre>${JSON.stringify(res.tokens, null, 2)}</pre>`
-      if (firstWithUri && typeof firstWithUri === 'object' && 'metadataUri' in firstWithUri && (firstWithUri as any).metadataUri) {
-        try {
-          const md = await resolveMetadata((firstWithUri as any).metadataUri)
-          console.log('Resolved metadata:', md)
-          const image = md.image || ''
-          const name = md.name || ''
-          const animation = md.animation_url || ''
-          mediaHtml = `<div class="media"><div class="media-header">${name}</div><img class="cover" src="${image}" alt="${name}" /></div>`
-          if (animation) {
-            mediaHtml += `<div style="display:none" id="videoUrl">${animation}</div>`
-            // show video immediately instead of separate mount
-            mediaHtml += `<div id="videoMount"><video class="media-video" src="${animation}" controls autoplay muted playsinline></video></div>`
-          }
-        } catch (e) {
-          console.warn('metadata resolve failed', e)
-        }
+      // Hide the original scan button and replace with per-token play buttons
+      scanBtn.style.display = 'none'
+
+      // Ensure actions container exists (replaces scan area)
+      let actions = document.getElementById('actions')
+      if (!actions) {
+        actions = document.createElement('div')
+        actions.id = 'actions'
+        actions.style.marginTop = '12px'
+        document.querySelector('.container')!.insertBefore(actions, result)
       }
-      result.innerHTML = `<div class="have">You own NFTs: ${mediaHtml}</div><div style="margin-top:8px"><button id="playBtn" class="btn">Play Game</button></div>`
+      actions.innerHTML = ''
+
+      // Create a gallery mount to show each owned token image (lazy-loaded)
+      let gallery = document.getElementById('gallery')
+      if (!gallery) {
+        gallery = document.createElement('div')
+        gallery.id = 'gallery'
+        gallery.style.display = 'grid'
+        gallery.style.gridTemplateColumns = 'repeat(auto-fit, minmax(160px, 1fr))'
+        gallery.style.gap = '12px'
+        gallery.style.marginTop = '12px'
+        document.querySelector('.container')!.appendChild(gallery)
+      }
+      gallery.innerHTML = ''
+
+      // Populate gallery with cards for each token; metadata will be fetched lazily
+      res.tokens.forEach((token: any, idx: number) => {
+        const card = document.createElement('div')
+        card.className = 'token-card'
+        card.style.border = '2px solid #222'
+        card.style.padding = '8px'
+        card.style.background = '#081018'
+        card.style.color = 'var(--panel)'
+        card.style.display = 'flex'
+        card.style.flexDirection = 'column'
+        card.style.alignItems = 'center'
+        card.dataset.metadata = token.metadataUri || ''
+
+        const title = document.createElement('div')
+        title.className = 'token-title'
+        title.textContent = token.tokenId ? `#${token.tokenId}` : token.type
+        title.style.marginBottom = '8px'
+
+        const img = document.createElement('img')
+        img.className = 'cover'
+        img.alt = title.textContent || 'token'
+        img.style.background = '#000'
+        img.dataset.src = ''
+
+        const btn = document.createElement('button')
+        btn.className = 'btn play-token'
+        btn.textContent = 'Play Game'
+        btn.style.marginTop = '8px'
+        btn.dataset.tokenIndex = String(idx)
+
+        card.appendChild(title)
+        card.appendChild(img)
+        card.appendChild(btn)
+        gallery!.appendChild(card)
+      })
+
+      // Create a single master Play button that replaces the Scan button
+      const masterPlay = document.createElement('button')
+      masterPlay.id = 'masterPlay'
+      masterPlay.className = 'btn'
+      masterPlay.textContent = 'Play Game'
+      masterPlay.style.margin = '8px'
+      actions!.appendChild(masterPlay)
+
+      // Lazy-load metadata when each card enters viewport
+      const observer = new IntersectionObserver(async (entries, obs) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const card = entry.target as HTMLElement
+          const meta = card.dataset.metadata
+          if (!meta) { obs.unobserve(card); continue }
+          try {
+            const md = await resolveMetadata(meta)
+            const img = card.querySelector('img.cover') as HTMLImageElement
+            if (md.image) img.src = md.image
+            const title = card.querySelector('.token-title')
+            if (md.name && title) title.textContent = md.name
+            if (md.animation_url) card.dataset.animation = md.animation_url
+          } catch (e) {
+            console.warn('lazy metadata fetch failed', e)
+          }
+          obs.unobserve(card)
+        }
+      }, { root: null, rootMargin: '0px', threshold: 0.1 })
+
+      document.querySelectorAll('#gallery .token-card').forEach((c) => observer.observe(c))
+
+      // select first token by default
+      const firstCard = document.querySelector('#gallery .token-card') as HTMLElement | null
+      if (firstCard) firstCard.classList.add('selected')
+
+      // Overlay play button on each card and click-to-select
+      document.querySelectorAll('#gallery .token-card').forEach((card, idx) => {
+        const overlay = document.createElement('button')
+        overlay.className = 'overlay-play'
+        overlay.innerHTML = '►'
+        overlay.title = 'Play this token'
+        overlay.style.position = 'absolute'
+        overlay.style.left = '50%'
+        overlay.style.top = '50%'
+        overlay.style.transform = 'translate(-50%,-50%)'
+        overlay.style.background = 'rgba(0,0,0,0.6)'
+        overlay.style.color = '#f6f2d4'
+        overlay.style.border = '2px solid #fff5'
+        overlay.style.padding = '8px 12px'
+        overlay.style.borderRadius = '50%'
+        overlay.style.cursor = 'pointer'
+        overlay.dataset.tokenIndex = String(idx)
+        ;(card as HTMLElement).style.position = 'relative'
+        ;(card as HTMLElement).appendChild(overlay)
+
+        overlay.addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          // mark selected
+          document.querySelectorAll('#gallery .token-card').forEach((el) => el.classList.remove('selected'))
+          ;(card as HTMLElement).classList.add('selected')
+          // trigger master play
+          masterPlay.click()
+        })
+
+        card.addEventListener('click', () => {
+          document.querySelectorAll('#gallery .token-card').forEach((el) => el.classList.remove('selected'))
+          ;(card as HTMLElement).classList.add('selected')
+        })
+      })
+
+      result.innerHTML = `<div class="have">You own ${res.tokens.length} token(s).</div>`
+
+      // wire master play button to launch emulator for selected token
+      masterPlay.addEventListener('click', async () => {
+        status.textContent = 'Loading emulator...'
+        try {
+          const mount = document.createElement('div')
+          mount.style.marginTop = '12px'
+          document.querySelector('.container')!.appendChild(mount)
+          await loadEmulator('/public/roms/Maiworld_8-25-21.gb', mount, (m) => (status.textContent = m))
+          status.textContent = 'Emulator running'
+        } catch (err: any) {
+          status.textContent = `Emulator error: ${err?.message || err}`
+        }
+      })
     } else {
       result.innerHTML = `<div class="no">You do not own any required NFTs. <a href="https://opensea.io/collection/maiworld" target="_blank">Buy on OpenSea</a></div>`
     }

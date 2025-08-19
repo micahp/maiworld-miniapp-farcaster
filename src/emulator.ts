@@ -56,8 +56,8 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     container.style.left = '50%'
     container.style.top = '50%'
     container.style.transform = 'translate(-50%,-50%)'
-    container.style.width = '90vw'
-    container.style.height = '90vh'
+    container.style.width = '40vw'
+    container.style.height = '40vh'
     container.style.zIndex = '9999'
     container.style.display = 'flex'
     container.style.flexDirection = 'column'
@@ -125,6 +125,11 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     document.body.appendChild(close)
     // make container focusable so we can capture keyboard events reliably
     container.tabIndex = -1
+    container.style.outline = 'none'
+    // focus the container so key handlers remain active
+    try { container.focus() } catch (e) {}
+    // ensure clicking the canvas/container restores focus
+    container.addEventListener('click', () => { try { container.focus() } catch (e) {} })
   } else {
   // clear mount element and append
     mountEl!.innerHTML = ''

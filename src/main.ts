@@ -154,25 +154,56 @@ scanBtn.addEventListener('click', async () => {
           // mark selected
           document.querySelectorAll('#gallery .token-card').forEach((el) => el.classList.remove('selected'))
           ;(card as HTMLElement).classList.add('selected')
-          // If this token has an animation_url, play it in-place; otherwise trigger master Play
+          // If this token has an animation_url, open modal overlay and play it; otherwise trigger master Play
           const animation = (card as HTMLElement).dataset.animation || ''
           if (animation) {
-            // hide img if present
-            const imgEl = card.querySelector('img.cover') as HTMLImageElement | null
-            if (imgEl) imgEl.style.display = 'none'
-            // reuse existing video if present
-            let v = card.querySelector('video.token-video') as HTMLVideoElement | null
-            if (!v) {
-              v = document.createElement('video')
-              v.className = 'token-video media-video'
-              v.src = animation
-              v.controls = true
-              v.autoplay = true
-              v.muted = true // allow autoplay in browsers; user can unmute
-              v.playsInline = true
-              card.appendChild(v)
+            // hide masterPlay while video modal is open
+            const master = document.getElementById('masterPlay')
+            if (master) master.style.display = 'none'
+
+            // create modal
+            const modal = document.createElement('div')
+            modal.id = 'videoModal'
+            modal.className = 'video-modal'
+
+            const backdrop = document.createElement('div')
+            backdrop.className = 'video-backdrop'
+
+            const box = document.createElement('div')
+            box.className = 'video-box'
+
+            const v = document.createElement('video')
+            v.className = 'token-video media-video'
+            v.src = animation
+            v.controls = true
+            v.autoplay = true
+            v.muted = false
+            v.playsInline = true
+            v.style.maxWidth = '90%'
+            v.style.maxHeight = '80%'
+
+            const close = document.createElement('button')
+            close.className = 'video-close btn'
+            close.textContent = 'Close'
+            close.style.marginTop = '12px'
+
+            box.appendChild(v)
+            box.appendChild(close)
+            modal.appendChild(backdrop)
+            modal.appendChild(box)
+            document.body.appendChild(modal)
+
+            // play
+            try { await v.play() } catch (_) { /* ignore autoplay issues */ }
+
+            function teardown() {
+              try { v.pause() } catch (e) {}
+              modal.remove()
+              if (master) master.style.display = ''
             }
-            try { await v.play() } catch (_) { /* ignore play errors */ }
+
+            backdrop.addEventListener('click', teardown)
+            close.addEventListener('click', teardown)
           } else {
             masterPlay.click()
           }

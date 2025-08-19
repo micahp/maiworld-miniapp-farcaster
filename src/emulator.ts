@@ -45,12 +45,25 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     return { canvas: document.createElement('canvas'), romSize: buf.byteLength }
   }
 
+  // Add one-time global debug listeners to verify browser sees Space key
+  if (!(window as any).__MAIWORLD_KEYDBG) {
+    ;(window as any).__MAIWORLD_KEYDBG = true
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
+        console.log('Global listener: Space keydown detected', { code: e.code, key: e.key })
+      }
+    }, { capture: true })
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
+        console.log('Global listener: Space keyup detected', { code: e.code, key: e.key })
+      }
+    }, { capture: true })
+  }
+
   onProgress?.('Initializing canvas...')
 
   // create container either inside provided mount or as a fullscreen overlay
   const container = document.createElement('div')
-  // noop updater until HUD is created (scoped so keyboard handlers can call it)
-  let updateInputHud: (key: string, pressed: boolean) => void = () => {}
   const isOverlay = !mountEl
   if (isOverlay) {
     // overlay styles: centered modal that fills most of the viewport
@@ -127,40 +140,6 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     document.body.appendChild(close)
     // make container focusable so we can capture keyboard events reliably
     container.tabIndex = -1
-    container.style.outline = 'none'
-    // focus the container so key handlers remain active
-    try { container.focus() } catch (e) {}
-    // ensure clicking the canvas/container restores focus
-    container.addEventListener('click', () => { try { container.focus() } catch (e) {} })
-
-    // input HUD: small debug indicator to show last key events
-    const inputHud = document.createElement('div')
-    inputHud.style.position = 'absolute'
-    inputHud.style.left = '12px'
-    inputHud.style.top = '12px'
-    inputHud.style.padding = '6px 10px'
-    inputHud.style.background = 'rgba(0,0,0,0.6)'
-    inputHud.style.color = '#f6f2d4'
-    inputHud.style.fontFamily = 'monospace'
-    inputHud.style.fontSize = '12px'
-    inputHud.style.border = '1px solid #fff3'
-    inputHud.style.borderRadius = '6px'
-    inputHud.style.zIndex = '10001'
-    inputHud.textContent = 'Input: idle'
-    container.appendChild(inputHud)
-
-    function updateInputHudLocal(key: string, pressed: boolean) {
-      try {
-        inputHud.textContent = `${pressed ? '↓' : '↑'} ${key}`
-        console.log('Input HUD:', pressed ? 'down' : 'up', key)
-        // briefly highlight
-        inputHud.style.opacity = '1'
-        clearTimeout((inputHud as any)._timeout)
-        ;(inputHud as any)._timeout = setTimeout(() => { inputHud.style.opacity = '0.8'; }, 300)
-      } catch (e) {}
-    }
-    // wire local updater to the outer-scoped function so handlers can call it
-    updateInputHud = updateInputHudLocal
   } else {
   // clear mount element and append
     mountEl!.innerHTML = ''
@@ -256,24 +235,16 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
         }
 
         // buttons via instance API
-        const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select', Space: 'a' }
-        function resolveKeyIdentifier(e: KeyboardEvent) {
-          // normalize Space key across browsers: e.key can be ' ' or 'Spacebar' or e.code === 'Space'
-          if (e.code === 'Space') return 'Space'
-          if (e.key === ' ' || e.key === 'Spacebar') return 'Space'
-          return e.key
-        }
+        const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select' }
         function keyHandlerInstance(e: KeyboardEvent, pressed: boolean) {
           // ignore events originating from form elements so accidental focus doesn't steal controls
           const active = document.activeElement
           if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-          const ident = resolveKeyIdentifier(e)
-          const k = keyMap[ident]
+          const k = keyMap[e.key]
           if (!k) return
           e.preventDefault()
           e.stopPropagation()
           try { if (pressed) wb.buttonDown(k); else wb.buttonUp(k) } catch (er) {}
-          try { updateInputHud(k, pressed) } catch (e) {}
         }
         window.addEventListener('keydown', (e) => keyHandlerInstance(e, true), { capture: true })
         window.addEventListener('keyup', (e) => keyHandlerInstance(e, false), { capture: true })
@@ -303,24 +274,17 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
 
           // controller state mapping
           const controllerState: any = { UP: 0, RIGHT: 0, DOWN: 0, LEFT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
-          const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT', Space: 'A' }
-          function resolveKeyIdentifier(e: KeyboardEvent) {
-            if (e.code === 'Space') return 'Space'
-            if (e.key === ' ' || e.key === 'Spacebar') return 'Space'
-            return e.key
-          }
+          const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT' }
           function keyHandlerSingleton(e: KeyboardEvent, pressed: boolean) {
             // ignore inputs when user is editing a form element
             const active = document.activeElement
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-            const ident = resolveKeyIdentifier(e)
-            const s = keyToState[ident]
+            const s = keyToState[e.key]
             if (!s) return
             e.preventDefault()
             e.stopPropagation()
             controllerState[s] = pressed ? 1 : 0
             try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
-            try { updateInputHud(e.key, pressed) } catch (e) {}
           }
           window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true), { capture: true })
           window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false), { capture: true })

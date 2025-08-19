@@ -89,15 +89,8 @@ scanBtn.addEventListener('click', async () => {
         img.style.background = '#000'
         img.dataset.src = ''
 
-        const btn = document.createElement('button')
-        btn.className = 'btn play-token'
-        btn.textContent = 'Play Game'
-        btn.style.marginTop = '8px'
-        btn.dataset.tokenIndex = String(idx)
-
         card.appendChild(title)
         card.appendChild(img)
-        card.appendChild(btn)
         gallery!.appendChild(card)
       })
 
@@ -136,7 +129,7 @@ scanBtn.addEventListener('click', async () => {
       const firstCard = document.querySelector('#gallery .token-card') as HTMLElement | null
       if (firstCard) firstCard.classList.add('selected')
 
-      // Overlay play button on each card and click-to-select
+      // Overlay play button on each card and click-to-select (no per-card Play buttons below images)
       document.querySelectorAll('#gallery .token-card').forEach((card, idx) => {
         const overlay = document.createElement('button')
         overlay.className = 'overlay-play'

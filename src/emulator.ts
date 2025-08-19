@@ -256,12 +256,19 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
         }
 
         // buttons via instance API
-        const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select' }
+        const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select', Space: 'a' }
+        function resolveKeyIdentifier(e: KeyboardEvent) {
+          // normalize Space key across browsers: e.key can be ' ' or 'Spacebar' or e.code === 'Space'
+          if (e.code === 'Space') return 'Space'
+          if (e.key === ' ' || e.key === 'Spacebar') return 'Space'
+          return e.key
+        }
         function keyHandlerInstance(e: KeyboardEvent, pressed: boolean) {
           // ignore events originating from form elements so accidental focus doesn't steal controls
           const active = document.activeElement
           if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-          const k = keyMap[e.key]
+          const ident = resolveKeyIdentifier(e)
+          const k = keyMap[ident]
           if (!k) return
           e.preventDefault()
           e.stopPropagation()
@@ -296,12 +303,18 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
 
           // controller state mapping
           const controllerState: any = { UP: 0, RIGHT: 0, DOWN: 0, LEFT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
-          const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT' }
+          const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT', Space: 'A' }
+          function resolveKeyIdentifier(e: KeyboardEvent) {
+            if (e.code === 'Space') return 'Space'
+            if (e.key === ' ' || e.key === 'Spacebar') return 'Space'
+            return e.key
+          }
           function keyHandlerSingleton(e: KeyboardEvent, pressed: boolean) {
             // ignore inputs when user is editing a form element
             const active = document.activeElement
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-            const s = keyToState[e.key]
+            const ident = resolveKeyIdentifier(e)
+            const s = keyToState[ident]
             if (!s) return
             e.preventDefault()
             e.stopPropagation()

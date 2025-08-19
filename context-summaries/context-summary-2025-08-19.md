@@ -14,13 +14,15 @@ Additional context added by developer:
 - An empty commit with message `COMMIT` was applied to satisfy repository workflow.
 
 Recent updates (later on 2025-08-19):
-- Added safer ownership enumeration: prefer bundled `public/whitelist.json` and use a
-  read-only RPC provider for `ownerOf` checks of known Gold token IDs to avoid noisy
-  MetaMask RPC errors.
 - Implemented lazy gallery with per-card overlay play buttons that open animation
   videos in a modal overlay. Master Play button launches the emulator placeholder.
 - Exposed `window.getCurrentOwnership()` dev helper to run the ownership check from
   the browser console and inspect results for the logged-in account.
+ - Replaced brute-force `ownerOf` scans with safer ownership enumeration: detect
+   `ERC721Enumerable` and use `tokenOfOwnerByIndex` when available; for
+   non-enumerable contracts reconstruct ownership from `Transfer` event logs to
+   avoid RPC reverts (and added a console/progress log indicating whether
+   enumeration is supported). Linted and fixed related TypeScript issues.
 
 
 

@@ -4,6 +4,47 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
   if (!res.ok) throw new Error('Failed to fetch ROM')
   const buf = await res.arrayBuffer()
 
+  // Quick sanity check: many placeholder/text files are tiny. If ROM is
+  // suspiciously small, show a clear message instead of attempting to run.
+  const MIN_ROM_BYTES = 256
+  if (buf.byteLength < MIN_ROM_BYTES) {
+    console.error(`Loaded ROM is too small (${buf.byteLength} bytes). Replace ${romPath} with a real .gb binary in public/roms/`)
+    // show overlay/message immediately so user sees instructions
+    const placeholderContainer = document.createElement('div')
+    placeholderContainer.style.padding = '20px'
+    placeholderContainer.style.color = '#f6f2d4'
+    placeholderContainer.style.fontFamily = 'monospace'
+    placeholderContainer.style.textAlign = 'center'
+    placeholderContainer.textContent = `ROM loaded — ${buf.byteLength} bytes (invalid/placeholder). Please place the real Maiworld_8-25-21.gb in public/roms/ and reload.`
+    // If an overlay is expected, attach placeholder to body
+    const overlay = document.createElement('div')
+    overlay.style.position = 'fixed'
+    overlay.style.left = '5%'
+    overlay.style.top = '5%'
+    overlay.style.width = '90%'
+    overlay.style.height = '90%'
+    overlay.style.zIndex = '9999'
+    overlay.style.display = 'flex'
+    overlay.style.alignItems = 'center'
+    overlay.style.justifyContent = 'center'
+    overlay.style.background = '#081018'
+    overlay.style.border = '6px solid #f6f2d4'
+    overlay.appendChild(placeholderContainer)
+    const close = document.createElement('button')
+    close.className = 'btn'
+    close.textContent = 'Close'
+    close.style.position = 'absolute'
+    close.style.right = '12px'
+    close.style.top = '12px'
+    close.addEventListener('click', () => overlay.remove())
+    overlay.appendChild(close)
+    document.body.appendChild(overlay)
+    onProgress?.('Invalid ROM — please replace file')
+    // store ROM for debugging but don't attempt to run it
+    ;(window as any).__MAIWORLD_ROM = buf
+    return { canvas: document.createElement('canvas'), romSize: buf.byteLength }
+  }
+
   onProgress?.('Initializing canvas...')
 
   // create container either inside provided mount or as a fullscreen overlay

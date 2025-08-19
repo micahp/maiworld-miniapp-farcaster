@@ -149,13 +149,33 @@ scanBtn.addEventListener('click', async () => {
         ;(card as HTMLElement).style.position = 'relative'
         ;(card as HTMLElement).appendChild(overlay)
 
-        overlay.addEventListener('click', (ev) => {
+        overlay.addEventListener('click', async (ev) => {
           ev.stopPropagation()
           // mark selected
           document.querySelectorAll('#gallery .token-card').forEach((el) => el.classList.remove('selected'))
           ;(card as HTMLElement).classList.add('selected')
-          // trigger master play
-          masterPlay.click()
+          // If this token has an animation_url, play it in-place; otherwise trigger master Play
+          const animation = (card as HTMLElement).dataset.animation || ''
+          if (animation) {
+            // hide img if present
+            const imgEl = card.querySelector('img.cover') as HTMLImageElement | null
+            if (imgEl) imgEl.style.display = 'none'
+            // reuse existing video if present
+            let v = card.querySelector('video.token-video') as HTMLVideoElement | null
+            if (!v) {
+              v = document.createElement('video')
+              v.className = 'token-video media-video'
+              v.src = animation
+              v.controls = true
+              v.autoplay = true
+              v.muted = true // allow autoplay in browsers; user can unmute
+              v.playsInline = true
+              card.appendChild(v)
+            }
+            try { await v.play() } catch (_) { /* ignore play errors */ }
+          } else {
+            masterPlay.click()
+          }
         })
 
         card.addEventListener('click', () => {

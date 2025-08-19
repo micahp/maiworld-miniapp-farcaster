@@ -49,6 +49,8 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
 
   // create container either inside provided mount or as a fullscreen overlay
   const container = document.createElement('div')
+  // noop updater until HUD is created (scoped so keyboard handlers can call it)
+  let updateInputHud: (key: string, pressed: boolean) => void = () => {}
   const isOverlay = !mountEl
   if (isOverlay) {
     // overlay styles: centered modal that fills most of the viewport
@@ -56,8 +58,8 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     container.style.left = '50%'
     container.style.top = '50%'
     container.style.transform = 'translate(-50%,-50%)'
-    container.style.width = '40vw'
-    container.style.height = '40vh'
+    container.style.width = '50vw'
+    container.style.height = '50vh'
     container.style.zIndex = '9999'
     container.style.display = 'flex'
     container.style.flexDirection = 'column'
@@ -130,6 +132,35 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     try { container.focus() } catch (e) {}
     // ensure clicking the canvas/container restores focus
     container.addEventListener('click', () => { try { container.focus() } catch (e) {} })
+
+    // input HUD: small debug indicator to show last key events
+    const inputHud = document.createElement('div')
+    inputHud.style.position = 'absolute'
+    inputHud.style.left = '12px'
+    inputHud.style.top = '12px'
+    inputHud.style.padding = '6px 10px'
+    inputHud.style.background = 'rgba(0,0,0,0.6)'
+    inputHud.style.color = '#f6f2d4'
+    inputHud.style.fontFamily = 'monospace'
+    inputHud.style.fontSize = '12px'
+    inputHud.style.border = '1px solid #fff3'
+    inputHud.style.borderRadius = '6px'
+    inputHud.style.zIndex = '10001'
+    inputHud.textContent = 'Input: idle'
+    container.appendChild(inputHud)
+
+    function updateInputHudLocal(key: string, pressed: boolean) {
+      try {
+        inputHud.textContent = `${pressed ? '↓' : '↑'} ${key}`
+        console.log('Input HUD:', pressed ? 'down' : 'up', key)
+        // briefly highlight
+        inputHud.style.opacity = '1'
+        clearTimeout((inputHud as any)._timeout)
+        ;(inputHud as any)._timeout = setTimeout(() => { inputHud.style.opacity = '0.8'; }, 300)
+      } catch (e) {}
+    }
+    // wire local updater to the outer-scoped function so handlers can call it
+    updateInputHud = updateInputHudLocal
   } else {
   // clear mount element and append
     mountEl!.innerHTML = ''
@@ -235,6 +266,7 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
           e.preventDefault()
           e.stopPropagation()
           try { if (pressed) wb.buttonDown(k); else wb.buttonUp(k) } catch (er) {}
+          try { updateInputHud(k, pressed) } catch (e) {}
         }
         window.addEventListener('keydown', (e) => keyHandlerInstance(e, true), { capture: true })
         window.addEventListener('keyup', (e) => keyHandlerInstance(e, false), { capture: true })
@@ -275,6 +307,7 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
             e.stopPropagation()
             controllerState[s] = pressed ? 1 : 0
             try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
+            try { updateInputHud(e.key, pressed) } catch (e) {}
           }
           window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true), { capture: true })
           window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false), { capture: true })

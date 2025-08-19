@@ -55,8 +55,8 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     container.style.position = 'fixed'
     container.style.left = '5%'
     container.style.top = '5%'
-    container.style.width = '90%'
-    container.style.height = '90%'
+    container.style.width = '50%'
+    container.style.height = '50%'
     container.style.zIndex = '9999'
     container.style.display = 'flex'
     container.style.flexDirection = 'column'
@@ -68,8 +68,8 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     container.style.boxShadow = '0 8px 30px rgba(0,0,0,0.8)'
     container.style.boxSizing = 'border-box'
   } else {
-    container.style.display = 'flex'
-    container.style.flexDirection = 'column'
+  container.style.display = 'flex'
+  container.style.flexDirection = 'column'
     container.style.alignItems = 'stretch'
     container.style.justifyContent = 'center'
     container.style.width = '100%'
@@ -111,6 +111,9 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
     close.style.right = '12px'
     close.style.top = '12px'
     close.style.zIndex = '10000'
+    // prevent Close button from stealing focus on Enter/Space
+    close.tabIndex = -1
+    close.addEventListener('mousedown', (e) => { e.preventDefault() })
     close.addEventListener('click', () => {
       try { container.remove() } catch (e) {}
       try { overlayBackdrop?.remove() } catch (e) {}
@@ -118,9 +121,11 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
 
     document.body.appendChild(overlayBackdrop)
     document.body.appendChild(container)
-    container.appendChild(close)
+    document.body.appendChild(close)
+    // make container focusable so we can capture keyboard events reliably
+    container.tabIndex = -1
   } else {
-    // clear mount element and append
+  // clear mount element and append
     mountEl!.innerHTML = ''
     mountEl!.appendChild(container)
   }
@@ -216,13 +221,17 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
         // buttons via instance API
         const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select' }
         function keyHandlerInstance(e: KeyboardEvent, pressed: boolean) {
+          // ignore events originating from form elements so accidental focus doesn't steal controls
+          const active = document.activeElement
+          if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
           const k = keyMap[e.key]
           if (!k) return
           e.preventDefault()
+          e.stopPropagation()
           try { if (pressed) wb.buttonDown(k); else wb.buttonUp(k) } catch (er) {}
         }
-        window.addEventListener('keydown', (e) => keyHandlerInstance(e, true))
-        window.addEventListener('keyup', (e) => keyHandlerInstance(e, false))
+        window.addEventListener('keydown', (e) => keyHandlerInstance(e, true), { capture: true })
+        window.addEventListener('keyup', (e) => keyHandlerInstance(e, false), { capture: true })
 
         onProgress?.('Emulator running (WasmBoy)')
         return { canvas, romSize: buf.byteLength, wasmboy: wb }
@@ -251,14 +260,18 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
           const controllerState: any = { UP: 0, RIGHT: 0, DOWN: 0, LEFT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
           const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT' }
           function keyHandlerSingleton(e: KeyboardEvent, pressed: boolean) {
+            // ignore inputs when user is editing a form element
+            const active = document.activeElement
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
             const s = keyToState[e.key]
             if (!s) return
             e.preventDefault()
+            e.stopPropagation()
             controllerState[s] = pressed ? 1 : 0
             try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
           }
-          window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true))
-          window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false))
+          window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true), { capture: true })
+          window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false), { capture: true })
 
           onProgress?.('Emulator running (WasmBoy singleton)')
           return { canvas, romSize: buf.byteLength, wasmboy: WasmBoy }

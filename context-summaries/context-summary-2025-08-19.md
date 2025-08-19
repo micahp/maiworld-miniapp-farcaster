@@ -13,6 +13,16 @@ Additional context added by developer:
 - Decision log created at `decisions/token-gated-gb-miniapp-2025-08-19.md` and committed.
 - An empty commit with message `COMMIT` was applied to satisfy repository workflow.
 
+Recent updates (later on 2025-08-19):
+- Added safer ownership enumeration: prefer bundled `public/whitelist.json` and use a
+  read-only RPC provider for `ownerOf` checks of known Gold token IDs to avoid noisy
+  MetaMask RPC errors.
+- Implemented lazy gallery with per-card overlay play buttons that open animation
+  videos in a modal overlay. Master Play button launches the emulator placeholder.
+- Exposed `window.getCurrentOwnership()` dev helper to run the ownership check from
+  the browser console and inspect results for the logged-in account.
+
+
 
 Files changed/created in this session
 - `package.json`, `vite.config.ts`, `index.html`

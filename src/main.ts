@@ -19,6 +19,24 @@ const status = document.getElementById('status')!
 const result = document.getElementById('result')!
 const scanBtn = document.getElementById('scanBtn') as HTMLButtonElement
 
+// Bypass test play button (visible before scanning) — useful for dev/testing
+const bypassPlay = document.createElement('button')
+bypassPlay.id = 'bypassPlayBtn'
+bypassPlay.className = 'btn'
+bypassPlay.textContent = 'Bypass Play (test)'
+bypassPlay.style.marginLeft = '8px'
+document.querySelector('.container')!.insertBefore(bypassPlay, result)
+
+bypassPlay.addEventListener('click', async () => {
+  status.textContent = 'Loading emulator (bypass)...'
+  try {
+    await loadEmulator('/roms/Maiworld_8-25-21.gb', null, (m) => (status.textContent = m))
+    status.textContent = 'Emulator running (bypass)'
+  } catch (err: any) {
+    status.textContent = `Emulator error: ${err?.message || err}`
+  }
+})
+
 ;(async function prefetch() {
   status.textContent = 'Loading catalog releases (cached)...'
   try {
@@ -217,14 +235,12 @@ scanBtn.addEventListener('click', async () => {
 
       result.innerHTML = `<div class="have">You own ${res.tokens.length} token(s).</div>`
 
-      // wire master play button to launch emulator for selected token
+      // wire master play button to launch emulator for selected token (overlay)
       masterPlay.addEventListener('click', async () => {
         status.textContent = 'Loading emulator...'
         try {
-          const mount = document.createElement('div')
-          mount.style.marginTop = '12px'
-          document.querySelector('.container')!.appendChild(mount)
-          await loadEmulator('/public/roms/Maiworld_8-25-21.gb', mount, (m) => (status.textContent = m))
+          // overlay mode: call without a mount element so emulator opens as fullscreen overlay
+          await loadEmulator('/roms/Maiworld_8-25-21.gb', null, (m) => (status.textContent = m))
           status.textContent = 'Emulator running'
         } catch (err: any) {
           status.textContent = `Emulator error: ${err?.message || err}`
@@ -245,10 +261,7 @@ result.addEventListener('click', async (e) => {
   if (target && target.id === 'playBtn') {
     status.textContent = 'Loading emulator...'
     try {
-      const mount = document.createElement('div')
-      mount.style.marginTop = '12px'
-      document.querySelector('.container')!.appendChild(mount)
-      await loadEmulator('/public/roms/Maiworld_8-25-21.gb', mount, (m) => (status.textContent = m))
+      await loadEmulator('/roms/Maiworld_8-25-21.gb', null, (m) => (status.textContent = m))
       status.textContent = 'Emulator running'
     } catch (err: any) {
       status.textContent = `Emulator error: ${err?.message || err}`
@@ -274,4 +287,22 @@ result.addEventListener('click', async (e) => {
   }
 })
 
+
+
+// Dev helper: expose a function to run the ownership check for the currently
+// connected account from the page console. Use in browser console:
+//   await window.getCurrentOwnership()
+// It returns the same object as checkOwnership and logs progress to console.
+;(window as any).getCurrentOwnership = async function() {
+  try {
+    console.log('Dev: running ownership check...')
+    const res = await checkOwnership((m: string) => console.log('progress:', m))
+    console.log('Dev: ownership result', res)
+    ;(window as any).__LAST_OWNERSHIP_RESULT = res
+    return res
+  } catch (err: any) {
+    console.error('Dev: ownership check failed', err)
+    throw err
+  }
+}
 

@@ -235,7 +235,21 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
         }
 
         // buttons via instance API
-        const keyMap: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', z: 'a', x: 'b', Enter: 'start', Shift: 'select' }
+        // Extend mapping so the SPACE key mirrors the primary "A" action button. This
+        // prevents the browser’s default page-scrolling behaviour after the first
+        // press and gives users a familiar control scheme.
+        const keyMap: Record<string, string> = {
+          ArrowUp: 'up',
+          ArrowDown: 'down',
+          ArrowLeft: 'left',
+          ArrowRight: 'right',
+          z: 'a',
+          x: 'b',
+          ' ': 'a',        // Spacebar (common e.key for most browsers)
+          Spacebar: 'a',   // Legacy browsers may report "Spacebar" string
+          Enter: 'start',
+          Shift: 'select'
+        }
         function keyHandlerInstance(e: KeyboardEvent, pressed: boolean) {
           // ignore events originating from form elements so accidental focus doesn't steal controls
           const active = document.activeElement
@@ -248,6 +262,7 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
         }
         window.addEventListener('keydown', (e) => keyHandlerInstance(e, true), { capture: true })
         window.addEventListener('keyup', (e) => keyHandlerInstance(e, false), { capture: true })
+        console.log('DBG: registered instance key handlers (capture=true)')
 
         onProgress?.('Emulator running (WasmBoy)')
         return { canvas, romSize: buf.byteLength, wasmboy: wb }
@@ -272,22 +287,56 @@ export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null
           else if (typeof WasmBoy.run === 'function') WasmBoy.run()
           console.log('WasmBoy singleton started')
 
-          // controller state mapping
+          // controller state mapping + continuous-input helper structures
           const controllerState: any = { UP: 0, RIGHT: 0, DOWN: 0, LEFT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
-          const keyToState: Record<string, keyof typeof controllerState> = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT' }
+          const keyToState: Record<string, keyof typeof controllerState> = {
+            ArrowUp: 'UP',
+            ArrowDown: 'DOWN',
+            ArrowLeft: 'LEFT',
+            ArrowRight: 'RIGHT',
+            z: 'A',
+            x: 'B',
+            ' ': 'A',     // Spacebar maps to A (modern browsers)
+            Spacebar: 'A',
+            Enter: 'START',
+            Shift: 'SELECT'
+          }
+
+          // Track currently pressed keys so we can refresh joypad state every frame.
+          const pressedKeys = new Set<string>()
+
+          function updateJoypadFromPressedKeys() {
+            // Reset all bits
+            for (const k in controllerState) controllerState[k as keyof typeof controllerState] = 0
+            pressedKeys.forEach((browserKey) => {
+              const s = keyToState[browserKey]
+              if (s) controllerState[s] = 1
+            })
+            try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
+          }
+
           function keyHandlerSingleton(e: KeyboardEvent, pressed: boolean) {
             // ignore inputs when user is editing a form element
             const active = document.activeElement
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-            const s = keyToState[e.key]
-            if (!s) return
+            const browserKey = e.key
+            if (!(browserKey in keyToState)) return
             e.preventDefault()
             e.stopPropagation()
-            controllerState[s] = pressed ? 1 : 0
-            try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
+            if (pressed) pressedKeys.add(browserKey); else pressedKeys.delete(browserKey)
+            updateJoypadFromPressedKeys()
           }
+
           window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true), { capture: true })
           window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false), { capture: true })
+
+          // Kick off a rAF loop to continuously feed the state for smoother movement
+          function joypadFrame() {
+            if (pressedKeys.size) updateJoypadFromPressedKeys()
+            requestAnimationFrame(joypadFrame)
+          }
+          requestAnimationFrame(joypadFrame)
+          console.log('DBG: registered singleton key handlers + rAF loop (capture=true)')
 
           onProgress?.('Emulator running (WasmBoy singleton)')
           return { canvas, romSize: buf.byteLength, wasmboy: WasmBoy }

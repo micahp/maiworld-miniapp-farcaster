@@ -5,16 +5,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "ethers": "^6.9.0"
-    ,"wasmboy": "^0.1.0"
+    "ethers": "^6.9.0",
+    "wasmboy": "^0.1.0"
   },
   "devDependencies": {
+    "jsdom": "^29.1.1",
     "typescript": "^5.4.2",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "vitest": "^4.1.6"
   }
 }
-
-

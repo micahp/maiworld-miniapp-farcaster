@@ -1,357 +1,441 @@
-export async function loadEmulator(romPath: string, mountEl?: HTMLElement | null, onProgress?: (msg: string) => void) {
+/**
+ * Load the MaiWorld GameBoy emulator using the WasmBoy npm package.
+ * Supports keyboard/gamepad input, save-state, and overlay/inline rendering.
+ */
+
+export interface EmulatorHandle {
+  canvas: HTMLCanvasElement
+  romSize: number
+  /** Clean up listeners and pause the emulator. */
+  destroy: () => void
+}
+
+const SAVE_KEY = 'maiworld_gb_savestate'
+
+// ── Key → Joypad bit mapping ────────────────────────────────────────────
+type JoypadKey = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT' | 'A' | 'B' | 'SELECT' | 'START'
+
+const KEY_MAP: Record<string, JoypadKey> = {
+  ArrowUp: 'UP',
+  ArrowDown: 'DOWN',
+  ArrowLeft: 'LEFT',
+  ArrowRight: 'RIGHT',
+  z: 'A',
+  x: 'B',
+  ' ': 'A',        // Spacebar → A (modern browsers)
+  Spacebar: 'A',    // Legacy
+  Enter: 'START',
+  Shift: 'SELECT',
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function isFormActive(): boolean {
+  const el = document.activeElement
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement).isContentEditable
+}
+
+async function loadWasmBoyModule(): Promise<any> {
+  // Dynamic import from the npm package – WasmBoy is a named export.
+  const mod = await import('wasmboy')
+  return mod.WasmBoy
+}
+
+async function loadSaveStateFromStorage(): Promise<any> {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore parse errors */ }
+  return null
+}
+
+async function persistSaveState(state: any): Promise<void> {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(state))
+  } catch { /* ignore quota errors */ }
+}
+
+// ── Main loader ─────────────────────────────────────────────────────────
+
+export async function loadEmulator(
+  romPath: string,
+  mountEl?: HTMLElement | null,
+  onProgress?: (msg: string) => void,
+): Promise<EmulatorHandle> {
   onProgress?.('Fetching ROM...')
   const res = await fetch(romPath)
-  if (!res.ok) throw new Error('Failed to fetch ROM')
+  if (!res.ok) throw new Error(`Failed to fetch ROM: ${res.status}`)
   const buf = await res.arrayBuffer()
 
-  // Quick sanity check: many placeholder/text files are tiny. If ROM is
-  // suspiciously small, show a clear message instead of attempting to run.
+  // Quick sanity check
   const MIN_ROM_BYTES = 256
   if (buf.byteLength < MIN_ROM_BYTES) {
-    console.error(`Loaded ROM is too small (${buf.byteLength} bytes). Replace ${romPath} with a real .gb binary in public/roms/`)
-    // show overlay/message immediately so user sees instructions
-    const placeholderContainer = document.createElement('div')
-    placeholderContainer.style.padding = '20px'
-    placeholderContainer.style.color = '#f6f2d4'
-    placeholderContainer.style.fontFamily = 'monospace'
-    placeholderContainer.style.textAlign = 'center'
-    placeholderContainer.textContent = `ROM loaded — ${buf.byteLength} bytes (invalid/placeholder). Please place the real Maiworld_8-25-21.gb in public/roms/ and reload.`
-    // If an overlay is expected, attach placeholder to body
-    const overlay = document.createElement('div')
-    overlay.style.position = 'fixed'
-    overlay.style.left = '5%'
-    overlay.style.top = '5%'
-    overlay.style.width = '90%'
-    overlay.style.height = '90%'
-    overlay.style.zIndex = '9999'
-    overlay.style.display = 'flex'
-    overlay.style.alignItems = 'center'
-    overlay.style.justifyContent = 'center'
-    overlay.style.background = '#081018'
-    overlay.style.border = '6px solid #f6f2d4'
-    overlay.appendChild(placeholderContainer)
-    const close = document.createElement('button')
-    close.className = 'btn'
-    close.textContent = 'Close'
-    close.style.position = 'absolute'
-    close.style.right = '12px'
-    close.style.top = '12px'
-    close.addEventListener('click', () => overlay.remove())
-    overlay.appendChild(close)
-    document.body.appendChild(overlay)
-    onProgress?.('Invalid ROM — please replace file')
-    // store ROM for debugging but don't attempt to run it
-    ;(window as any).__MAIWORLD_ROM = buf
-    return { canvas: document.createElement('canvas'), romSize: buf.byteLength }
+    const msg = `ROM too small (${buf.byteLength} bytes). Replace ${romPath} with real .gb binary.`
+    console.error(msg)
+    onProgress?.(msg)
+    showPlaceholderOverlay(msg)
+    return {
+      canvas: document.createElement('canvas'),
+      romSize: buf.byteLength,
+      destroy: () => {},
+    }
   }
 
-  // Add one-time global debug listeners to verify browser sees Space key
-  if (!(window as any).__MAIWORLD_KEYDBG) {
-    ;(window as any).__MAIWORLD_KEYDBG = true
-    document.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
-        console.log('Global listener: Space keydown detected', { code: e.code, key: e.key })
-      }
-    }, { capture: true })
-    document.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
-        console.log('Global listener: Space keyup detected', { code: e.code, key: e.key })
-      }
-    }, { capture: true })
-  }
+  onProgress?.('Initializing WasmBoy...')
 
-  onProgress?.('Initializing canvas...')
-
-  // create container either inside provided mount or as a fullscreen overlay
-  const container = document.createElement('div')
+  // ── Container / canvas ──────────────────────────────────────────────────
   const isOverlay = !mountEl
+  const container = document.createElement('div')
+
   if (isOverlay) {
-    // overlay styles: centered modal that fills most of the viewport
-    container.style.position = 'fixed'
-    container.style.left = '50%'
-    container.style.top = '50%'
-    container.style.transform = 'translate(-50%,-50%)'
-    container.style.width = '50vw'
-    container.style.height = '50vh'
-    container.style.zIndex = '9999'
-    container.style.display = 'flex'
-    container.style.flexDirection = 'column'
-    // make children stretch to fill container so canvas can scale
-    container.style.alignItems = 'stretch'
-    container.style.justifyContent = 'center'
-    container.style.background = '#081018'
-    container.style.border = '6px solid #f6f2d4'
-    container.style.boxShadow = '0 8px 30px rgba(0,0,0,0.8)'
-    container.style.boxSizing = 'border-box'
+    Object.assign(container.style, {
+      position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+      width: '50vw', height: '50vh', zIndex: '9999',
+      display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center',
+      background: '#081018', border: '6px solid #f6f2d4',
+      boxShadow: '0 8px 30px rgba(0,0,0,0.8)', boxSizing: 'border-box',
+    })
   } else {
-  container.style.display = 'flex'
-  container.style.flexDirection = 'column'
-    container.style.alignItems = 'stretch'
-    container.style.justifyContent = 'center'
-    container.style.width = '100%'
-    container.style.height = '100%'
-    container.style.boxSizing = 'border-box'
+    Object.assign(container.style, {
+      display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center',
+      width: '100%', height: '100%', boxSizing: 'border-box',
+    })
   }
 
   const canvas = document.createElement('canvas')
-  // GameBoy native resolution 160x144; scale for visibility
   canvas.width = 160 * 3
   canvas.height = 144 * 3
   canvas.style.imageRendering = 'pixelated'
   canvas.style.background = '#000'
-  // scale canvas to fill parent container while preserving internal resolution
   canvas.style.width = '100%'
   canvas.style.height = '100%'
   canvas.style.maxWidth = '100%'
   canvas.style.maxHeight = '100%'
-
-  // append canvas only; any user-facing messages are shown via overlay or console
   container.appendChild(canvas)
 
-  // If overlay, add close button and backdrop behavior
-  let overlayBackdrop: HTMLDivElement | null = null
+  // ── Overlay: backdrop + close + button bar (save/load/gamepad) ──────────
+  let cleanupFns: Array<() => void> = []
+
   if (isOverlay) {
-    overlayBackdrop = document.createElement('div')
-    overlayBackdrop.style.position = 'fixed'
-    overlayBackdrop.style.left = '0'
-    overlayBackdrop.style.top = '0'
-    overlayBackdrop.style.width = '100%'
-    overlayBackdrop.style.height = '100%'
-    overlayBackdrop.style.background = 'rgba(0,0,0,0.6)'
-    overlayBackdrop.style.zIndex = '9998'
+    const backdrop = document.createElement('div')
+    Object.assign(backdrop.style, {
+      position: 'fixed', left: '0', top: '0', width: '100%', height: '100%',
+      background: 'rgba(0,0,0,0.6)', zIndex: '9998',
+    })
+    backdrop.addEventListener('click', () => destroy())
+    document.body.appendChild(backdrop)
 
     const close = document.createElement('button')
     close.className = 'btn'
     close.textContent = 'Close'
-    close.style.position = 'absolute'
-    close.style.right = '12px'
-    close.style.top = '12px'
-    close.style.zIndex = '10000'
-    // prevent Close button from stealing focus on Enter/Space
-    close.tabIndex = -1
-    close.addEventListener('mousedown', (e) => { e.preventDefault() })
-    close.addEventListener('click', () => {
-      try { container.remove() } catch (e) {}
-      try { overlayBackdrop?.remove() } catch (e) {}
+    Object.assign(close.style, {
+      position: 'absolute', right: '12px', top: '12px', zIndex: '10000',
     })
+    close.tabIndex = -1
+    close.addEventListener('mousedown', (e) => e.preventDefault())
+    close.addEventListener('click', () => destroy())
 
-    document.body.appendChild(overlayBackdrop)
+    document.body.appendChild(backdrop)
     document.body.appendChild(container)
     document.body.appendChild(close)
-    // make container focusable so we can capture keyboard events reliably
+
+    // Save-state & gamepad toolbar
+    const toolbar = document.createElement('div')
+    Object.assign(toolbar.style, {
+      position: 'absolute', left: '12px', bottom: '12px', zIndex: '10000',
+      display: 'flex', gap: '6px',
+    })
+
+    const btnStyle = 'background:#222;color:#f6f2d4;border:2px solid #f6f2d4;padding:6px 10px;font-size:11px;cursor:pointer;border-radius:4px;font-family:monospace'
+
+    const saveBtn = document.createElement('button')
+    saveBtn.textContent = '💾 Save'
+    saveBtn.setAttribute('style', btnStyle)
+    saveBtn.addEventListener('click', () => saveGame())
+
+    const loadBtn = document.createElement('button')
+    loadBtn.textContent = '📂 Load'
+    loadBtn.setAttribute('style', btnStyle)
+    loadBtn.addEventListener('click', () => loadGame())
+
+    const gpBtn = document.createElement('button')
+    gpBtn.textContent = '🎮 Gamepad'
+    gpBtn.setAttribute('style', btnStyle)
+    let gamepadOn = false
+    gpBtn.addEventListener('click', () => {
+      if (gamepadOn) {
+        WasmBoyInstance?.disableDefaultJoypad()
+        gamepadOn = false
+        gpBtn.textContent = '🎮 Gamepad'
+      } else {
+        WasmBoyInstance?.enableDefaultJoypad()
+        gamepadOn = true
+        gpBtn.textContent = '🎮 Gamepad ✓'
+      }
+    })
+
+    toolbar.appendChild(saveBtn)
+    toolbar.appendChild(loadBtn)
+    toolbar.appendChild(gpBtn)
+    container.appendChild(toolbar)
+
+    // ── Touch controls (mobile D-pad + A/B) ────────────────────────────────
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (isTouchDevice) {
+      const touchPad = document.createElement('div')
+      Object.assign(touchPad.style, {
+        position: 'absolute', right: '12px', bottom: '12px', zIndex: '10000',
+        display: 'grid', gridTemplateColumns: 'repeat(3, 52px)', gridTemplateRows: 'repeat(3, 52px)',
+        gap: '2px',
+      })
+
+      const padBtnStyle = [
+        'background:rgba(246,242,212,0.15)', 'color:#f6f2d4',
+        'border:2px solid rgba(246,242,212,0.4)', 'borderRadius:8px',
+        'display:flex', 'alignItems:center', 'justifyContent:center',
+        'fontSize:18px', 'userSelect:none', 'touchAction:none',
+      ].join(';')
+
+      const makeTouchBtn = (label: string, joypadKey: JoypadKey, gridArea?: string): HTMLButtonElement => {
+        const btn = document.createElement('button')
+        btn.textContent = label
+        btn.setAttribute('style', padBtnStyle)
+        if (gridArea) btn.style.gridArea = gridArea
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); pressedKeys.add(joypadKey); updateJoypad() })
+        btn.addEventListener('touchend', (e) => { e.preventDefault(); pressedKeys.delete(joypadKey); updateJoypad() })
+        btn.addEventListener('touchcancel', (e) => { pressedKeys.delete(joypadKey); updateJoypad() })
+        // Also support mouse for dev/testing on desktop
+        btn.addEventListener('mousedown', (e) => { e.preventDefault(); pressedKeys.add(joypadKey); updateJoypad() })
+        btn.addEventListener('mouseup', (e) => { pressedKeys.delete(joypadKey); updateJoypad() })
+        btn.addEventListener('mouseleave', (e) => { pressedKeys.delete(joypadKey); updateJoypad() })
+        return btn
+      }
+
+      // D-pad layout:   [  ] [▲] [  ]
+      //                 [◄] [  ] [►]
+      //                 [  ] [▼] [  ]
+      touchPad.appendChild(makeTouchBtn('▲', 'UP'))
+      touchPad.appendChild(makeTouchBtn('◄', 'LEFT'))
+      const empty = document.createElement('div'); touchPad.appendChild(empty)
+      touchPad.appendChild(makeTouchBtn('►', 'RIGHT'))
+      touchPad.appendChild(makeTouchBtn('▼', 'DOWN'))
+
+      // Action buttons: A / B
+      const actionPad = document.createElement('div')
+      Object.assign(actionPad.style, {
+        position: 'absolute', left: '12px', bottom: '12px', zIndex: '10000',
+        display: 'flex', gap: '6px',
+      })
+      actionPad.appendChild(makeTouchBtn('B', 'B'))
+      actionPad.appendChild(makeTouchBtn('A', 'A'))
+
+      // START / SELECT small buttons
+      const menuPad = document.createElement('div')
+      Object.assign(menuPad.style, {
+        position: 'absolute', left: '50%', bottom: '12px', zIndex: '10000',
+        display: 'flex', gap: '6px', transform: 'translateX(-50%)',
+      })
+      const smallBtnStyle = padBtnStyle.replace('fontSize:18px', 'fontSize:11px').replace('52px', '44px')
+      const makeSmallBtn = (label: string, joypadKey: JoypadKey): HTMLButtonElement => {
+        const btn = document.createElement('button')
+        btn.textContent = label
+        btn.setAttribute('style', smallBtnStyle)
+        btn.style.width = '56px'; btn.style.height = '34px'
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); pressedKeys.add(joypadKey); updateJoypad() })
+        btn.addEventListener('touchend', (e) => { e.preventDefault(); pressedKeys.delete(joypadKey); updateJoypad() })
+        btn.addEventListener('mousedown', (e) => { e.preventDefault(); pressedKeys.add(joypadKey); updateJoypad() })
+        btn.addEventListener('mouseup', (e) => { pressedKeys.delete(joypadKey); updateJoypad() })
+        return btn
+      }
+      menuPad.appendChild(makeSmallBtn('SELECT', 'SELECT'))
+      menuPad.appendChild(makeSmallBtn('START', 'START'))
+
+      container.appendChild(touchPad)
+      container.appendChild(actionPad)
+      container.appendChild(menuPad)
+    }
+
+    // Make container focusable for keyboard capture
     container.tabIndex = -1
   } else {
-  // clear mount element and append
+    // Inline mount
     mountEl!.innerHTML = ''
     mountEl!.appendChild(container)
   }
 
-  // placeholder draw (canvas only)
+  // ── Load WasmBoy ────────────────────────────────────────────────────────
+  let WasmBoyInstance: any = null
+  const romBytes = new Uint8Array(buf)
+
+  try {
+    WasmBoyInstance = await loadWasmBoyModule()
+    console.log('WasmBoy module loaded:', !!WasmBoyInstance)
+  } catch (err) {
+    console.error('Failed to load WasmBoy npm module:', err)
+    onProgress?.('WasmBoy failed to load — showing placeholder')
+    showPlaceholderDraw(canvas)
+    return { canvas, romSize: buf.byteLength, destroy }
+  }
+
+  try {
+    // Config with canvas; isAudioEnabled can be toggled if wanted
+    await WasmBoyInstance.config(
+      { isAudioEnabled: true, isGbcEnabled: true, gameboyFrameRate: 60 },
+      canvas,
+    )
+    await WasmBoyInstance.loadROM(romBytes)
+    console.log('WasmBoy ROM loaded')
+    onProgress?.('ROM loaded; starting emulation...')
+    await WasmBoyInstance.play()
+    console.log('WasmBoy started')
+  } catch (err) {
+    console.error('WasmBoy init/load error:', err)
+    onProgress?.('Emulator init failed — showing placeholder')
+    showPlaceholderDraw(canvas)
+    return { canvas, romSize: buf.byteLength, destroy }
+  }
+
+  // ── Keyboard input (capture phase) ──────────────────────────────────────
+  const pressedKeys = new Set<JoypadKey>()
+
+  function updateJoypad() {
+    if (!WasmBoyInstance) return
+    const state: Record<string, number> = { UP: 0, DOWN: 0, LEFT: 0, RIGHT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
+    pressedKeys.forEach((k) => { state[k] = 1 })
+    try { WasmBoyInstance.setJoypadState(state) } catch { /* ignore */ }
+  }
+
+  function onKeyDown(e: KeyboardEvent) {
+    if (isFormActive()) return
+    const k = KEY_MAP[e.key]
+    if (!k) return
+    e.preventDefault()
+    e.stopPropagation()
+    pressedKeys.add(k)
+    updateJoypad()
+  }
+
+  function onKeyUp(e: KeyboardEvent) {
+    if (isFormActive()) return
+    const k = KEY_MAP[e.key]
+    if (!k) return
+    e.preventDefault()
+    e.stopPropagation()
+    pressedKeys.delete(k)
+    updateJoypad()
+  }
+
+  window.addEventListener('keydown', onKeyDown, { capture: true })
+  window.addEventListener('keyup', onKeyUp, { capture: true })
+  cleanupFns.push(() => {
+    window.removeEventListener('keydown', onKeyDown, { capture: true })
+    window.removeEventListener('keyup', onKeyUp, { capture: true })
+  })
+
+  // rAF loop for continuous joypad state
+  let rafId = 0
+  function joypadFrame() {
+    if (pressedKeys.size) updateJoypad()
+    rafId = requestAnimationFrame(joypadFrame)
+  }
+  rafId = requestAnimationFrame(joypadFrame)
+  cleanupFns.push(() => cancelAnimationFrame(rafId))
+
+  // ── Save / Load state ───────────────────────────────────────────────────
+  async function saveGame() {
+    if (!WasmBoyInstance) return
+    try {
+      const state = await WasmBoyInstance.saveState()
+      await persistSaveState(state)
+      console.log('Save state persisted')
+      showToast('💾 Saved!')
+    } catch (err) {
+      console.error('Save failed:', err)
+      showToast('Save failed')
+    }
+  }
+
+  async function loadGame() {
+    if (!WasmBoyInstance) return
+    try {
+      const state = await loadSaveStateFromStorage()
+      if (!state) { showToast('No save found'); return }
+      await WasmBoyInstance.loadState(state)
+      console.log('Save state loaded')
+      showToast('📂 Loaded!')
+    } catch (err) {
+      console.error('Load failed:', err)
+      showToast('Load failed')
+    }
+  }
+
+  onProgress?.('Emulator running (WasmBoy)')
+
+  // ── Destroy / teardown ──────────────────────────────────────────────────
+  function destroy() {
+    try { WasmBoyInstance?.pause() } catch { /* ignore */ }
+    cleanupFns.forEach((fn) => fn())
+    try { container.remove() } catch { /* ignore */ }
+    // Remove backdrop + close button if overlay
+    if (isOverlay) {
+      document.querySelectorAll('*').forEach((el) => {
+        const z = (el as HTMLElement).style.zIndex
+        if (z === '9998' || z === '10000') {
+          try { el.remove() } catch { /* ignore */ }
+        }
+      })
+    }
+  }
+
+  return { canvas, romSize: buf.byteLength, destroy }
+}
+
+// ── Placeholder fallbacks ────────────────────────────────────────────────
+
+function showPlaceholderDraw(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d')!
   ctx.fillStyle = '#0b1220'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.fillStyle = '#b6f'
   ctx.font = '20px monospace'
   ctx.fillText('MAiWorld (demo)', 16, 40)
-
-  onProgress?.('Emulator placeholder running')
-
-  // store ROM in window for potential real emulator wiring later
-  ;(window as any).__MAIWORLD_ROM = buf
-  // Try to initialize WasmBoy if available on window (loaded via CDN)
-  try {
-    // ensure WasmBoy is available; try npm dynamic import first, then window global, then CDN
-    // @ts-ignore
-    let WasmBoy = (window as any).WasmBoy
-    // attempt dynamic npm import (preferred when installed)
-    try {
-      // dynamic import; suppress TS module-not-found lint if types are absent
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      const mod = await import('wasmboy')
-      // module might export default or named WasmBoy
-      // @ts-ignore
-      WasmBoy = mod?.default ?? mod?.WasmBoy ?? mod
-      console.log('WasmBoy npm import available:', !!WasmBoy)
-    } catch (impErr) {
-      console.warn('WasmBoy npm import failed (not installed?):', impErr)
-    }
-    console.log('WasmBoy global initially:', !!WasmBoy)
-    if (!WasmBoy) {
-      const cdnCandidates = [
-        'https://unpkg.com/wasmboy/dist/wasmboy.min.js',
-        'https://cdn.jsdelivr.net/npm/wasmboy/dist/wasmboy.min.js',
-        'https://cdn.jsdelivr.net/gh/wasmboy/wasmboy/dist/wasmboy.min.js'
-      ]
-      let loaded = false
-      for (const scriptUrl of cdnCandidates) {
-        try {
-          console.log('Attempting to load WasmBoy CDN script:', scriptUrl)
-          await new Promise<void>((resolve, reject) => {
-            const s = document.createElement('script')
-            s.src = scriptUrl
-            s.async = false
-            s.onload = () => resolve()
-            s.onerror = (e) => reject(new Error(`WasmBoy CDN script failed to load: ${scriptUrl}`))
-            document.head.appendChild(s)
-            // timeout
-            setTimeout(() => reject(new Error(`WasmBoy CDN script load timeout: ${scriptUrl}`)), 8000)
-          })
-          // @ts-ignore
-          WasmBoy = (window as any).WasmBoy
-          console.log('WasmBoy global after dynamic load attempt:', !!WasmBoy, scriptUrl)
-          if (WasmBoy) { loaded = true; break }
-        } catch (loadErr) {
-          console.warn('WasmBoy CDN dynamic load failed for', scriptUrl, loadErr)
-        }
-      }
-      if (!loaded) console.error('All WasmBoy CDN load attempts failed')
-    }
-    if (WasmBoy) {
-      // Two possible shapes: CDN exposes a factory with create(), npm dist exposes
-      // a singleton object with methods like loadROM/play/setCanvas.
-      if (typeof WasmBoy.create === 'function') {
-        onProgress?.('Initializing WasmBoy (factory.create)...')
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        const wb = await WasmBoy.create({ canvas: canvas, enableAudio: false })
-        console.log('WasmBoy instance created via create():', !!wb)
-
-        try {
-          const romBytes = new Uint8Array(buf)
-          console.log('ROM bytes length:', romBytes.length)
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          await wb.loadROM(romBytes)
-          console.log('WasmBoy ROM loaded successfully (instance)')
-          onProgress?.('WasmBoy ROM loaded; starting...')
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          wb.run()
-          console.log('WasmBoy instance started')
-        } catch (romErr) {
-          console.error('WasmBoy instance ROM load failed', romErr)
-          onProgress?.('WasmBoy ROM load failed — showing placeholder')
-        }
-
-        // buttons via instance API
-        // Extend mapping so the SPACE key mirrors the primary "A" action button. This
-        // prevents the browser’s default page-scrolling behaviour after the first
-        // press and gives users a familiar control scheme.
-        const keyMap: Record<string, string> = {
-          ArrowUp: 'up',
-          ArrowDown: 'down',
-          ArrowLeft: 'left',
-          ArrowRight: 'right',
-          z: 'a',
-          x: 'b',
-          ' ': 'a',        // Spacebar (common e.key for most browsers)
-          Spacebar: 'a',   // Legacy browsers may report "Spacebar" string
-          Enter: 'start',
-          Shift: 'select'
-        }
-        function keyHandlerInstance(e: KeyboardEvent, pressed: boolean) {
-          // ignore events originating from form elements so accidental focus doesn't steal controls
-          const active = document.activeElement
-          if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-          const k = keyMap[e.key]
-          if (!k) return
-          e.preventDefault()
-          e.stopPropagation()
-          try { if (pressed) wb.buttonDown(k); else wb.buttonUp(k) } catch (er) {}
-        }
-        window.addEventListener('keydown', (e) => keyHandlerInstance(e, true), { capture: true })
-        window.addEventListener('keyup', (e) => keyHandlerInstance(e, false), { capture: true })
-        console.log('DBG: registered instance key handlers (capture=true)')
-
-        onProgress?.('Emulator running (WasmBoy)')
-        return { canvas, romSize: buf.byteLength, wasmboy: wb }
-      }
-
-      // npm/dist variant: singleton API
-      if (typeof WasmBoy.loadROM === 'function') {
-        console.log('Using WasmBoy singleton API (npm dist)')
-        try {
-          // set canvas if available
-          try { WasmBoy.setCanvas && WasmBoy.setCanvas(canvas) } catch (e) {}
-          const romBytes = new Uint8Array(buf)
-          console.log('ROM bytes length:', romBytes.length)
-          // WasmBoy.loadROM accepts various inputs; pass Uint8Array
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          await WasmBoy.loadROM(romBytes)
-          console.log('WasmBoy singleton ROM loaded')
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          if (typeof WasmBoy.play === 'function') WasmBoy.play()
-          else if (typeof WasmBoy.run === 'function') WasmBoy.run()
-          console.log('WasmBoy singleton started')
-
-          // controller state mapping + continuous-input helper structures
-          const controllerState: any = { UP: 0, RIGHT: 0, DOWN: 0, LEFT: 0, A: 0, B: 0, SELECT: 0, START: 0 }
-          const keyToState: Record<string, keyof typeof controllerState> = {
-            ArrowUp: 'UP',
-            ArrowDown: 'DOWN',
-            ArrowLeft: 'LEFT',
-            ArrowRight: 'RIGHT',
-            z: 'A',
-            x: 'B',
-            ' ': 'A',     // Spacebar maps to A (modern browsers)
-            Spacebar: 'A',
-            Enter: 'START',
-            Shift: 'SELECT'
-          }
-
-          // Track currently pressed keys so we can refresh joypad state every frame.
-          const pressedKeys = new Set<string>()
-
-          function updateJoypadFromPressedKeys() {
-            // Reset all bits
-            for (const k in controllerState) controllerState[k as keyof typeof controllerState] = 0
-            pressedKeys.forEach((browserKey) => {
-              const s = keyToState[browserKey]
-              if (s) controllerState[s] = 1
-            })
-            try { WasmBoy.setJoypadState && WasmBoy.setJoypadState(controllerState) } catch (er) {}
-          }
-
-          function keyHandlerSingleton(e: KeyboardEvent, pressed: boolean) {
-            // ignore inputs when user is editing a form element
-            const active = document.activeElement
-            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return
-            const browserKey = e.key
-            if (!(browserKey in keyToState)) return
-            e.preventDefault()
-            e.stopPropagation()
-            if (pressed) pressedKeys.add(browserKey); else pressedKeys.delete(browserKey)
-            updateJoypadFromPressedKeys()
-          }
-
-          window.addEventListener('keydown', (e) => keyHandlerSingleton(e, true), { capture: true })
-          window.addEventListener('keyup', (e) => keyHandlerSingleton(e, false), { capture: true })
-
-          // Kick off a rAF loop to continuously feed the state for smoother movement
-          function joypadFrame() {
-            if (pressedKeys.size) updateJoypadFromPressedKeys()
-            requestAnimationFrame(joypadFrame)
-          }
-          requestAnimationFrame(joypadFrame)
-          console.log('DBG: registered singleton key handlers + rAF loop (capture=true)')
-
-          onProgress?.('Emulator running (WasmBoy singleton)')
-          return { canvas, romSize: buf.byteLength, wasmboy: WasmBoy }
-        } catch (err) {
-          console.error('WasmBoy singleton error', err)
-        }
-      }
-    }
-    console.log('WasmBoy.create not available; will use placeholder')
-  } catch (wbErr) {
-    console.error('WasmBoy init error', wbErr)
-  }
-
-  // If WasmBoy not available or failed, return placeholder
-  return { canvas, romSize: buf.byteLength }
 }
 
+function showPlaceholderOverlay(message: string) {
+  const overlay = document.createElement('div')
+  Object.assign(overlay.style, {
+    position: 'fixed', left: '5%', top: '5%', width: '90%', height: '90%',
+    zIndex: '9999', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: '#081018', border: '6px solid #f6f2d4',
+  })
+  const inner = document.createElement('div')
+  inner.style.cssText = 'padding:20px;color:#f6f2d4;font-family:monospace;text-align:center'
+  inner.textContent = message
+  overlay.appendChild(inner)
 
+  const close = document.createElement('button')
+  close.className = 'btn'
+  close.textContent = 'Close'
+  close.style.cssText = 'position:absolute;right:12px;top:12px'
+  close.addEventListener('click', () => overlay.remove())
+  overlay.appendChild(close)
+  document.body.appendChild(overlay)
+}
+
+function showToast(message: string) {
+  const toast = document.createElement('div')
+  Object.assign(toast.style, {
+    position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+    background: '#f6f2d4', color: '#081018', padding: '8px 20px', borderRadius: '6px',
+    fontFamily: 'monospace', fontSize: '14px', zIndex: '20000',
+    transition: 'opacity 0.3s',
+  })
+  toast.textContent = message
+  document.body.appendChild(toast)
+  setTimeout(() => {
+    toast.style.opacity = '0'
+    setTimeout(() => toast.remove(), 300)
+  }, 1500)
+}

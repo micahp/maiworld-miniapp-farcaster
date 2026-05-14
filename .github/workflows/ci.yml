@@ -20,7 +20,7 @@ jobs:
       - run: npm ci
 
       - name: Type check
-        run: npx tsc --noEmit 2>&1 | grep -v "node_modules/" || true
+        run: npx tsc --noEmit
 
       - name: Run tests
         run: npm test
